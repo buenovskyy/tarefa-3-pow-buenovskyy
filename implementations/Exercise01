@@ -1,0 +1,103 @@
+import csv
+
+WEIGHT_LIMIT = 4_000_000
+REQUIRED = "4c50e3dad7f98bceb6441f96b23748dea84fbdb7cedd603441e6ea4a574d04a6"
+
+mempool = {}
+with open("data/mempool.csv", newline="", encoding="utf-8") as f:
+    for row in csv.reader(f):
+        txid = row[0].strip().lower()
+        fee = int(row[1])
+        weight = int(row[2])
+        parents = (
+            [p.strip().lower() for p in row[3].split(";") if p.strip()]
+            if len(row) >= 4 and row[3].strip()
+            else []
+        )
+        mempool[txid] = {"fee": fee, "weight": weight, "parents": parents}
+
+for tx, d in mempool.items():
+    for p in d["parents"]:
+        assert p in mempool, f"parent {p} of {tx} missing in mempool"
+
+_anc_cache = {}
+def ancestors(tx):
+    if tx in _anc_cache:
+        return _anc_cache[tx]
+    acc = set()
+    for p in mempool[tx]["parents"]:
+        acc.add(p)
+        acc |= ancestors(p)
+    _anc_cache[tx] = acc
+    return acc
+
+
+def topo_order(txset):
+    """Return txs in a valid order: every parent before its child."""
+    out = []
+    visited = set()
+    def dfs(t):
+        if t in visited:
+            return
+        visited.add(t)
+        for p in mempool[t]["parents"]:
+            if p in txset:
+                dfs(p)
+        out.append(t)
+    for t in txset:
+        dfs(t)
+    return out
+
+
+included = set()
+ordered = []         
+total_weight = 0
+total_fee = 0
+
+
+def add_package(pkg_ordered):
+    global total_weight, total_fee
+    for t in pkg_ordered:
+        if t in included:
+            continue
+        included.add(t)
+        ordered.append(t)
+        total_weight += mempool[t]["weight"]
+        total_fee += mempool[t]["fee"]
+
+req_pkg = ancestors(REQUIRED) | {REQUIRED}
+req_w = sum(mempool[t]["weight"] for t in req_pkg)
+assert req_w <= WEIGHT_LIMIT, "required package alone exceeds the weight limit"
+add_package(topo_order(req_pkg))
+
+remaining = set(mempool.keys()) - included
+
+while True:
+    best_tx = None
+    best_rate = -1.0
+    best_pkg = None
+    best_w = None
+    for tx in remaining:
+        need = (ancestors(tx) | {tx}) - included
+        w = sum(mempool[t]["weight"] for t in need)
+        if w == 0 or total_weight + w > WEIGHT_LIMIT:
+            continue
+        fee = sum(mempool[t]["fee"] for t in need)
+        rate = fee / w
+        if rate > best_rate:
+            best_rate = rate
+            best_tx = tx
+            best_pkg = need
+            best_w = w
+    if best_tx is None:
+        break
+    add_package(topo_order(best_pkg))
+    remaining -= included
+
+with open("solutions/exercise01.txt", "w", encoding="utf-8") as f:
+    f.write("\n".join(ordered) + "\n")
+
+print(f"selected txs : {len(ordered)}")
+print(f"total weight : {total_weight} / {WEIGHT_LIMIT}")
+print(f"total fee    : {total_fee} sats")
+print(f"required incl: {REQUIRED in included}")
