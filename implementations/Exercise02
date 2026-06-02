@@ -1,0 +1,42 @@
+import hashlib
+
+TARGET = "49ff8cccf1ca12179e9ae7a4760f550b5a18401b27e1e057604e27c3e10c08fb"
+
+
+def sha256(b: bytes) -> bytes:
+    return hashlib.sha256(b).digest()
+
+
+leaves = []
+with open("data/ex02_txid_list.txt", encoding="utf-8") as f:
+    for ln in f:
+        s = ln.strip().lower()
+        if s:
+            leaves.append(bytes.fromhex(s))
+
+idx = [i for i, h in enumerate(leaves) if h.hex() == TARGET]
+assert len(idx) == 1, f"target found {len(idx)} times"
+pos = idx[0]
+
+proof = []
+level = leaves[:]
+while len(level) > 1:
+    if len(level) % 2 == 1:
+        level.append(level[-1])
+    sib = pos ^ 1                         
+    proof.append(level[sib])
+    nxt = []
+    for i in range(0, len(level), 2):
+        nxt.append(sha256(level[i] + level[i + 1]))
+    level = nxt
+    pos //= 2
+
+root = level[0]
+
+with open("solutions/exercise02.txt", "w", encoding="utf-8") as f:
+    f.write(root.hex() + "\n")
+    for p in proof:
+        f.write(p.hex() + "\n")
+
+print("merkle root:", root.hex())
+print("proof levels:", len(proof))
